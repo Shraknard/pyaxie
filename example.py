@@ -7,9 +7,9 @@ The other are working locally but you have to save_axie()
 """
 
 import yaml # To work with our yaml secret file
-import random
+import random # To generate random numbers
 from pyaxie import pyaxie # Import pyaxie lib to use axie functions
-from pprint import pprint
+from pprint import pprint # For beutiful prints
 
 ##########################
 #     AUTHENTICATION     #
@@ -29,6 +29,7 @@ rnd_id = random.randint(10000, 1000000)
 # Create a pyaxie object
 pyaxie = pyaxie(ronin_address, private_key)
 
+"""
 # Once a pyaxie object have been created, you can access some of it's data
 pprint(pyaxie.ronin_address)
 pprint(pyaxie.private_key)
@@ -60,9 +61,11 @@ pyaxie.get_qr_code()
 pprint("############### Access Token ##################")
 pprint(pyaxie.get_access_token())
 
-# Eth price from axie marketplace
-pprint("############### ETH Price ##################")
-pprint(pyaxie.get_eth_price())
+# Prices from axie marketplace
+pprint("############### Crypto Prices ##################")
+pprint("ETH = " + str(pyaxie.get_price('eth')))
+pprint("SLP = " + str(pyaxie.get_price('slp')))
+pprint("AXS = " + str(pyaxie.get_price('axs')))
 
 # Get profile information
 pprint("############### Profile Data ##################")
@@ -129,3 +132,13 @@ pprint(pyaxie.axie_infos(rnd_id, "name"))
 pprint(pyaxie.axie_infos(rnd_id, "parts"))
 pprint(pyaxie.axie_infos(rnd_id, "image"))
 pprint(pyaxie.axie_infos(rnd_id, "stats"))
+
+# Claim SLP of the account
+pprint("############### Claim SLP ##################")
+pprint(pyaxie.claim_slp())
+
+# Rename an axie (need an ID from an axie that is in your account)
+pprint("############### Rename axie ##################")
+
+pprint(pyaxie.rename_axie(765175, 'yolo'))
+"""
