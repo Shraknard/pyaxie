@@ -30,6 +30,8 @@ rnd_id = random.randint(10000, 1000000)
 pyaxie = pyaxie(ronin_address, private_key)
 
 """
+# YOU HAVE TO UNCOMMENT THE FUNCTIONS THAT YOU WANT TO TEST (You can uncomment all of them to see everything)
+
 # Once a pyaxie object have been created, you can access some of it's data
 pprint(pyaxie.ronin_address)
 pprint(pyaxie.private_key)
@@ -77,15 +79,15 @@ pprint(pyaxie.get_activity_log())
 
 # Get profile name
 pprint("############### Profile Name ##################")
-pprint(pyaxie.get_profile_name("0x8644da68ff6ac82cb88ce43fde655a62c905e13f"))
+pprint(pyaxie.get_profile_name(pyaxie.ronin_address))
 
 # Get public profile
 pprint("############### Public Profile ##################")
-pprint(pyaxie.get_public_profile('0x8644da68ff6ac82cb88ce43fde655a62c905e13f'))
+pprint(pyaxie.get_public_profile(pyaxie.ronin_address))
 
 # Get axie list of a given account
 pprint("############### Account axies list ##################")
-pprint(pyaxie.get_axie_brief_list("0x8644da68ff6ac82cb88ce43fde655a62c905e13f"))
+pprint(pyaxie.get_axie_brief_list(pyaxie.ronin_address))
 
 # Get axie image from axie id
 pprint("############### Axie image ##################")
