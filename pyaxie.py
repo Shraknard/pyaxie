@@ -25,7 +25,7 @@ class pyaxie(object):
 		:param private_key: Private key belonging to the ronin account
 		"""
 		with open("secret.yaml", "r") as file:
-			config = yaml.load(file, Loader=yaml.FullLoader)
+			config = yaml.safeload(file, Loader=yaml.FullLoader)
 
 		self.config = config
 		self.ronin_address = ronin_address
