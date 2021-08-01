@@ -1,9 +1,6 @@
 """
 Here is a demonstration on how to use the library.
 You will find a test of every functions consecutively.
-
-The function names starting with 'get_' are using http request
-The other are working locally but you have to save_axie()
 """
 
 import yaml # To work with our yaml secret file
@@ -170,8 +167,8 @@ print("\n############### Claim SLP ##################")
 claim_txn = pyax.claim_slp(ronin_web3, pyax, slp_contract)
 pprint(claim_txn)
 
-"""
 
+# Claim/transfer test
 #manager = pyaxie(config['personal']['ronin_address'])
 scholar = pyaxie(config['scholars']['Deadly']['ronin_address'], config['scholars']['Deadly']['private_key'])
 
@@ -179,7 +176,7 @@ claim_tx = scholar.claim_slp()
 print(claim_tx)
 tx = scholar.transfer_slp(manager.ronin_address, 1)
 print(tx)
-
+"""
 
 
 
