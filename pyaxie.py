@@ -3,17 +3,22 @@ import json
 import yaml
 import qrcode
 import os
+import datetime
 import time
+import math
+import sys
+from datetime import timedelta
 
+from web3 import Web3
 from web3.auto import w3
 from eth_account.messages import encode_defunct
-import datetime
+from collections import namedtuple
 from pprint import pprint
 
 
 class pyaxie(object):
 
-	def __init__(self, ronin_address, private_key):
+	def __init__(self, ronin_address="", private_key=""):
 		"""
 		Init the class variables, we need a ronin address and its private key
 		:param ronin_address: The ronin address
@@ -25,19 +30,24 @@ class pyaxie(object):
 		self.config = config
 		self.ronin_address = ronin_address
 		self.private_key = private_key
-		self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36'}
+		self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36', 'authorization': ""}
 		self.url = "https://axieinfinity.com/graphql-server-v2/graphql"
 		self.access_token = self.get_access_token()
-		self.headers['authorization'] = 'Bearer ' + self.access_token
 		self.account_id = 0
 		self.email = ""
 		self.account_name = ""
+		self.slp_contract = None
+		self.ronin_web3 = self.get_ronin_web3()
 		self.axie_list_path = config['paths']['axie_list_path']
 		self.slp_track_path = config['paths']['slp_track_path']
 
-	def ronin_address(self): return self.ronin_address
-	def private_key(self): return self.private_key
-	def access_token(self): return self.access_token
+		for scholar in config['scholars'].values():
+			if scholar['ronin_address'] == ronin_address:
+				self.payout_percentage = scholar['payout_percentage']
+				self.personal_ronin = scholar['personal_ronin']
+			else:
+				self.payout_percentage = 0
+				self.personal_ronin = None
 
 
 	############################
@@ -91,6 +101,8 @@ class pyaxie(object):
 		body['variables']['input']['owner'] = ronin_address
 
 		r = requests.post(self.url, headers=self.headers, json=body)
+		print(r.text)
+		exit()
 		try:
 			json_data = json.loads(r.text)
 		except ValueError as e:
@@ -105,6 +117,8 @@ class pyaxie(object):
 		msg = self.get_raw_message()
 		signed = self.sign_message(msg)
 		token = self.submit_signature(signed, msg)
+		self.access_token = token
+		self.headers['authorization'] = 'Bearer ' + token
 		return token
 
 	def get_qr_code(self):
@@ -114,7 +128,6 @@ class pyaxie(object):
 		img = qrcode.make(self.access_token)
 		img.save('QRCode-' + str(datetime.datetime.now()) + '.png')
 		return
-
 
 	#################################
 	# Account interaction functions #
@@ -191,6 +204,10 @@ class pyaxie(object):
 			return e
 		return json_data['data']['publicProfileWithRoninAddress']
 
+	#############################################
+	# Functions to interact with axies from web #
+	#############################################
+
 	def get_axie_list(self, ronin_address):
 		"""
 		Get informations about the axies in a specific account
@@ -204,11 +221,6 @@ class pyaxie(object):
 		except ValueError as e:
 			return e
 		return json_data['data']['axies']['results']
-
-
-	#############################################
-	# Functions to interact with axies from web #
-	#############################################
 
 	def get_axie_image(self, axie_id):
 		"""
@@ -279,6 +291,22 @@ class pyaxie(object):
 		data = self.get_axie_detail(axie_id)
 		return data['class']
 
+	def rename_axie(self, axie_id, new_name):
+		"""
+		Rename an axie
+		:param axie_id: The id of the axie to rename
+		:param new_name: The new name of the axie
+		:return: True/False or error
+		"""
+		body = {"operationName": "RenameAxie", "variables": {"axieId": str(axie_id),"name": str(new_name) }, "query": "mutation RenameAxie($axieId: ID!, $name: String!) {\n  renameAxie(axieId: $axieId, name: $name) {\n    result\n    __typename\n  }\n}\n"}
+		r = requests.post(self.url, headers=self.headers, json=body)
+		try:
+			json_data = json.loads(r.text)
+		except ValueError as e:
+			return e
+		if json_data['data'] is None:
+			return json_data['errors']['message']
+		return json_data['data']['renameAxie']['result']
 
 	###############################################
 	# Functions to interact with stored axie data #
@@ -370,54 +398,129 @@ class pyaxie(object):
 		url = 'https://marketplace.axieinfinity.com/axie/'
 		return url + str(axie_id)
 
+	###################
+	# Ronin functions #
+	###################
+
+	def get_ronin_web3(self):
+		"""
+		:return: Return the ronin web3
+		"""
+		web3 = Web3(Web3.HTTPProvider('https://proxy.roninchain.com/free-gas-rpc'))
+		return web3
+
+	def get_slp_contract(self, ronin_web3, slp_abi_path):
+		"""
+		:param ronin_web3: ronin web3 object
+		:param slp_abi_path: ABI for SLP
+		:return: The contract to interact with
+		"""
+		slp_contract_address = "0xa8754b9fa15fc18bb59458815510e40a12cd2014"
+		with open(slp_abi_path) as f:
+			try:
+				slp_abi = json.load(f)
+			except ValueError as e:
+				return e
+		contract = ronin_web3.eth.contract(address=w3.toChecksumAddress(slp_contract_address), abi=slp_abi)
+		self.slp_contract = contract
+		return contract
+
+	def get_claimed_slp(self, address):
+		"""
+		:param address: Ronin address to check
+		:return: The amount of claimed SLP
+		"""
+		address = w3.toChecksumAddress(address)
+		return int(self.slp_contract.functions.balanceOf(address).call())
+
+	def get_unclaimed_slp(self, address):
+		"""
+		:param address: Ronin address to check
+		:return: The amount of unclaimed SLP
+		"""
+		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1",
+								headers=self.headers,
+								data="")
+
+		if response.status_code != 200:
+			print(response.text)
+		assert response.status_code == 200
+
+		result = response.json()
+		total = int(result["total"])
+		last_claimed_item_at = datetime.datetime.utcfromtimestamp(int(result["last_claimed_item_at"]))
+
+		if datetime.datetime.utcnow() + timedelta(days=-14) < last_claimed_item_at:
+			total = 0
+		return total
+
 	def claim_slp(self):
 		"""
-		Tells if you can claim SLP or not
-		:return: The time when it will be claimable
+		Claim SLP on the account.
+		:return: Transaction of the claim
 		"""
-		url = 'https://game-api.skymavis.com/game-api/clients/' + self.ronin_address + '/items/1/claim'
-		body = {}
-		r = requests.post(url, headers=self.headers, json=body)
+		slp_claim = {
+			'address': self.ronin_address,
+			'private_key': self.private_key,
+			'state': {"signature": None}
+		}
+		access_token = self.get_access_token()
+		custom_headers = self.headers.copy()
+		custom_headers["authorization"] = f"Bearer {access_token}"
+		response = requests.post(f"https://game-api.skymavis.com/game-api/clients/{self.ronin_address}/items/1/claim",
+								 headers=custom_headers, json="")
+
+		if response.status_code != 200:
+			print(response.text)
+			return
+		assert response.status_code == 200
+		result = response.json()["blockchain_related"]["signature"]
+		checksum_address = w3.toChecksumAddress(self.ronin_address)
+		nonce = self.ronin_web3.eth.get_transaction_count(checksum_address)
+		slp_claim['state']["signature"] = result["signature"].replace("0x", "")
+		claim_txn = self.slp_contract.functions.checkpoint(checksum_address, result["amount"], result["timestamp"],
+													  slp_claim['state']["signature"]).buildTransaction(
+			{'gas': 1000000, 'gasPrice': 0, 'nonce': nonce})
+		signed_txn = self.ronin_web3.eth.account.sign_transaction(claim_txn, private_key=bytearray.fromhex(
+			self.private_key.replace("0x", "")))
+
+		self.ronin_web3.eth.send_raw_transaction(signed_txn.rawTransaction)
+		return self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))
+
+	def transfer_slp(self, to_address, amount):
+		"""
+		Transfer SLP from pyaxie ronin address to the to_address
+		:param to_address: Receiver of the SLP. Format : 0x
+		:param amount: Amount of SLP to send
+		:return:
+		"""
+		transfer_txn = self.slp_contract.functions.transfer(to_address, amount).buildTransaction({
+			'chainId': 2020,
+			'gas': 100000,
+			'gasPrice': Web3.toWei('0', 'gwei'),
+			'nonce': Web3.eth.get_transaction_count(w3.toChecksumAddress(self.ronin_address)),
+		})
+		private_key = bytearray.fromhex(self.private_key.replace("0x", ""))
+		signed_txn = self.ronin_web3.eth.account.sign_transaction(transfer_txn, private_key=private_key)
+		self.ronin_web3.eth.send_raw_transaction(signed_txn.rawTransaction)
+		return self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))  # Returns transaction hash.
+
+	def make_transaction(self):
+		"""
+		Send money to the scholar and to the manager/academy
+		:return: List of 2 transactions hash : scholar and manager
+		"""
+		txns = list()
+		slp_balance = self.get_claimed_slp(self.ronin_address)
+		scholar_payout_amount = math.ceil(slp_balance * self.payout_percentage)
+		academy_payout_amount = slp_balance - scholar_payout_amount
+
 		try:
-			json_data = json.loads(r.text)
+			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
+			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
 		except ValueError as e:
 			return e
-		wait = int(time.time()) - json_data['last_claimed_item_at']
-		if wait > 1350000:
-			return "You can claim " + str(json_data['claimable_total']) + " SLP !"
-		else:
-			return "You will be able to claim " + str(json_data['claimable_total']) + " SLP in " + str(datetime.timedelta(seconds=wait))
-
-	def rename_axie(self, axie_id, new_name):
-		"""
-		Rename an axie
-		:param axie_id: The id of the axie to rename
-		:param new_name: The new name of the axie
-		:return: True/False or error
-		"""
-		body = {"operationName": "RenameAxie", "variables": {"axieId": str(axie_id),"name": str(new_name) }, "query": "mutation RenameAxie($axieId: ID!, $name: String!) {\n  renameAxie(axieId: $axieId, name: $name) {\n    result\n    __typename\n  }\n}\n"}
-		r = requests.post(self.url, headers=self.headers, json=body)
-		try:
-			json_data = json.loads(r.text)
-		except ValueError as e:
-			return e
-		if json_data['data'] is None:
-			return json_data['errors']['message']
-		return json_data['data']['renameAxie']['result']
-
-	# Manque le Txn hash... Faut trouver comment faire des transactions avec ronin
-	def send_axie(self, axie_id):
-		body = {"operationName": "AddActivity", "variables": {"action": "GiftAxie", "data": {"axieId": axie_id,"txHash":"0x3e8fc5e4dda442825c44865a6be446ca515a6873a9456dd7dd6fa5fe88d216a4","destination":"0xb53733a0266d31f1c83cefae1f8929a82b55aa2a"}},"query":"mutation AddActivity($action: Action!, $data: ActivityDataInput!) {\n  createActivity(action: $action, data: $data) {\n    result\n    __typename\n  }\n}\n"}
-
-	def eth_estimate_gas(self):
-		url = "https://api.roninchain.com/rpc"
-		body = {"id":23,"jsonrpc":"2.0","params":[{"to":"0x32950db2a7164ae833121501c797d79e7b79d74c","data":"0x42842e0e0000000000000000000000005ff4885409ccee0bf35e6475930ea0b52ba62946000000000000000000000000b53733a0266d31f1c83cefae1f8929a82b55aa2a0000000000000000000000000000000000000000000000000000000000151391","from":"0x5ff4885409ccee0bf35e6475930ea0b52ba62946"}],"method":"eth_estimateGas"}
-
-
-
-	def save_accounts_datas(self): return
-
-
+		return txns
 
 
 
