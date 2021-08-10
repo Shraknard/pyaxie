@@ -19,9 +19,9 @@ from pprint import pprint # For beutiful prints
 with open("secret.yaml", "r") as file:
     config = yaml.safe_load(file)
 
-# Get datas from config
-ronin_address = config['scholars']['GeorgeFajardo']['ronin_address']
-private_key = config['scholars']['GeorgeFajardo']['private_key']
+# Get 1st scholar datas from config
+ronin_address = config['scholars'][0]['ronin_address']
+private_key = config['scholars'][0]['private_key']
 
 # Get a random axie ID to test the functions
 rnd_id = random.randint(10000, 1000000)
@@ -179,17 +179,3 @@ for account in config['scholars']:
     pprint(scholar.claim_slp())
     pprint(scholar.payout())
 
-
-
-
-"""
-l = list()
-for account in config['scholars']:
-    ronin = config['scholars'][account]['ronin_address']
-    private = config['scholars'][account]['private_key']
-    scholar = pyaxie(ronin, private)
-    unclaimed = scholar.get_unclaimed_slp()
-    l.append({'name': scholar.get_profile_name(), 'unclaimed': unclaimed})
-
-pprint(l)
-"""
