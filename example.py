@@ -17,16 +17,16 @@ from pprint import pprint # For beutiful prints
 
 # Get config datas
 with open("secret.yaml", "r") as file:
-    config = yaml.load(file, Loader=yaml.FullLoader)
+    config = yaml.safe_load(file)
 
 # Get datas from config
-ronin_address = config['scholars']['Deadly']['ronin_address']
-private_key = config['scholars']['Deadly']['private_key']
+ronin_address = config['scholars']['GeorgeFajardo']['ronin_address']
+private_key = config['scholars']['GeorgeFajardo']['private_key']
 
 # Get a random axie ID to test the functions
 rnd_id = random.randint(10000, 1000000)
 
-# Create a pyax object
+# Create a pyaxie object
 pyax = pyaxie(ronin_address, private_key)
 
 """
@@ -40,7 +40,8 @@ pprint(pyax.access_token)
 ##########################
 #     AUTHENTICATION     #
 ##########################
-"""
+
+
 # Get the raw message for authentication
 print("\n############### Raw message ##################")
 raw_message = pyax.get_raw_message()
@@ -54,7 +55,7 @@ pprint(signed_message)
 # Sumbit the message to get an access token
 print("\n############### Access Token ##################")
 pprint(pyax.submit_signature(signed_message, raw_message))
-"""
+
 # Generate a QR code from the token
 print("\n############### Generate QR ##################")
 pyax.get_qr_code()
@@ -135,14 +136,17 @@ pprint(pyax.axie_infos(rnd_id, "parts"))
 pprint(pyax.axie_infos(rnd_id, "image"))
 pprint(pyax.axie_infos(rnd_id, "stats"))
 
-# Claim SLP of the account
-print("\n############### Claim SLP ##################")
-pprint(pyax.claim_slp())
-
 # Rename an axie (need an ID from an axie that is in your account)
 print("\n############### Rename axie ##################")
 pprint(pyax.rename_axie(axie_id, 'yolo'))
 
+# Get MMR and rank for given address
+print("\n############### Get MMR / Rank ##################")
+pprint(pyax.get_rank_mmr(ronin_address))
+
+# Get a list of links of all your scholar's axies
+print("\n############### Get scholars axies links ##################")
+pprint(pyax.get_scholars_axies_links())
 
 # Get the ronin web3
 print("\n############### Get Ronin web3 ##################")
@@ -155,6 +159,7 @@ slp_abi_path = 'slp_abi.json'
 slp_contract = pyax.get_slp_contract(ronin_web3, slp_abi_path)
 pprint(slp_contract)
 
+
 # Get claimed SLP balance
 print("\n############### Get claimed SLP ##################")
 claimed_slp = pyax.get_claimed_slp(pyax.ronin_address)
@@ -164,22 +169,27 @@ pprint(claimed_slp)
 print("\n############### Get unclaimed SLP ##################")
 unclaimed_slp = pyax.get_unclaimed_slp(pyax.ronin_address)
 pprint(unclaimed_slp)
+"""
+# Claim SLP for all the scholars accounts in secret.yaml and send SLP to you and your scholar
+print("\n############### Payout ##################")
 
-# Claim SLP for the current account (pyax)
-print("\n############### Claim SLP ##################")
-claim_txn = pyax.claim_slp(ronin_web3, pyax, slp_contract)
-pprint(claim_txn)
+txns = list()
+for account in config['scholars']:
+    scholar = pyaxie(config['scholars'][account]['ronin_address'], config['scholars'][account]['private_key'])
+    pprint(scholar.claim_slp())
+    pprint(scholar.payout())
+
+
+
 
 """
+l = list()
+for account in config['scholars']:
+    ronin = config['scholars'][account]['ronin_address']
+    private = config['scholars'][account]['private_key']
+    scholar = pyaxie(ronin, private)
+    unclaimed = scholar.get_unclaimed_slp()
+    l.append({'name': scholar.get_profile_name(), 'unclaimed': unclaimed})
 
-#manager = pyaxie(config['personal']['ronin_address'])
-scholar = pyaxie(config['scholars']['Deadly']['ronin_address'], config['scholars']['Deadly']['private_key'])
-
-claim_tx = scholar.claim_slp()
-print(claim_tx)
-tx = scholar.transfer_slp(manager.ronin_address, 1)
-print(tx)
-
-
-
-
+pprint(l)
+"""

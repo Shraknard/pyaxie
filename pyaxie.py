@@ -25,7 +25,7 @@ class pyaxie(object):
 		:param private_key: Private key belonging to the ronin account
 		"""
 		with open("secret.yaml", "r") as file:
-			config = yaml.safeload(file, Loader=yaml.FullLoader)
+			config = yaml.safe_load(file)
 
 		self.config = config
 		self.ronin_address = ronin_address
@@ -40,14 +40,20 @@ class pyaxie(object):
 		self.ronin_web3 = self.get_ronin_web3()
 		self.axie_list_path = config['paths']['axie_list_path']
 		self.slp_track_path = config['paths']['slp_track_path']
+		self.slp_abi_path = 'slp_abi.json'
+		self.slp_contract = self.get_slp_contract(self.ronin_web3, self.slp_abi_path)
+		self.name = "you"
 
-		for scholar in config['scholars'].values():
-			if scholar['ronin_address'] == ronin_address:
-				self.payout_percentage = scholar['payout_percentage']
-				self.personal_ronin = scholar['personal_ronin']
+		for scholar in config['scholars']:
+			if config['scholars'][scholar]['ronin_address'] == ronin_address:
+				self.payout_percentage = config['scholars'][scholar]['payout_percentage']
+				self.personal_ronin = config['scholars'][scholar]['personal_ronin']
+				self.name = scholar
+				break
 			else:
 				self.payout_percentage = 0
 				self.personal_ronin = None
+
 
 
 	############################
@@ -99,10 +105,8 @@ class pyaxie(object):
 		body['variables']['input']['signature'] = signed_message['signature'].hex()
 		body['variables']['input']['message'] = raw_message
 		body['variables']['input']['owner'] = ronin_address
-
 		r = requests.post(self.url, headers=self.headers, json=body)
-		print(r.text)
-		exit()
+
 		try:
 			json_data = json.loads(r.text)
 		except ValueError as e:
@@ -114,6 +118,8 @@ class pyaxie(object):
 		Get an access token as proof of authentication
 		:return: The access token in string
 		"""
+		if not self.private_key:
+			return
 		msg = self.get_raw_message()
 		signed = self.sign_message(msg)
 		token = self.submit_signature(signed, msg)
@@ -176,12 +182,14 @@ class pyaxie(object):
 			return e
 		return json_data['data']['profile']['activities']
 
-	def get_profile_name(self, ronin_address):
+	def get_profile_name(self, ronin_address=''):
 		"""
 		Get the profile name of a ronin address
 		:param ronin_address: The target ronin account
 		:return: The name of the account
 		"""
+		if ronin_address == '':
+			ronin_address = self.ronin_address
 		body = {"operationName": "GetProfileNameByRoninAddress", "variables": {"roninAddress": ronin_address}, "query": "query GetProfileNameByRoninAddress($roninAddress: String!) {\n  publicProfileWithRoninAddress(roninAddress: $roninAddress) {\n    accountId\n    name\n    __typename\n  }\n}\n"}
 		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
@@ -190,12 +198,14 @@ class pyaxie(object):
 			return e
 		return json_data['data']['publicProfileWithRoninAddress']['name']
 
-	def get_public_profile(self, ronin_address):
+	def get_public_profile(self, ronin_address=''):
 		"""
 		Get infos about the given ronin address
 		:param ronin_address: The target ronin account
 		:return: Public datas of the ronin account
 		"""
+		if ronin_address == '':
+			ronin_address = self.ronin_address
 		body = {"operationName": "GetProfileByRoninAddress", "variables": {"roninAddress": ronin_address}, "query": "query GetProfileByRoninAddress($roninAddress: String!) {\n  publicProfileWithRoninAddress(roninAddress: $roninAddress) {\n    ...Profile\n    __typename\n  }\n}\n\nfragment Profile on PublicProfile {\n  accountId\n  name\n  addresses {\n    ...Addresses\n    __typename\n  }\n  __typename\n}\n\nfragment Addresses on NetAddresses {\n  ethereum\n  tomo\n  loom\n  ronin\n  __typename\n}\n"}
 		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
@@ -204,16 +214,36 @@ class pyaxie(object):
 			return e
 		return json_data['data']['publicProfileWithRoninAddress']
 
+	def get_rank_mmr(self, ronin_address=''):
+		"""
+		Get the mmr and rank of the current account
+		:return: Dict with MMR and rank
+		"""
+		if ronin_address == '':
+			ronin_address = self.ronin_address
+		params = {"client_id": ronin_address, "offset": 0, "limit": 0}
+		r = requests.get("https://game-api.skymavis.com/game-api/last-season-leaderboard", params=params)
+
+		try:
+			json_data = json.loads(r.text)
+		except ValueError as e:
+			return e
+		return {'mmr': json_data['items'][1]['elo'], 'rank': json_data['items'][1]['rank']}
+
+
+
 	#############################################
 	# Functions to interact with axies from web #
 	#############################################
 
-	def get_axie_list(self, ronin_address):
+	def get_axie_list(self, ronin_address=''):
 		"""
 		Get informations about the axies in a specific account
 		:param ronin_address: The ronin address of the target account
 		:return: Data about the axies
 		"""
+		if ronin_address == '':
+			ronin_address = self.ronin_address
 		body = {"operationName": "GetAxieBriefList", "variables": {"from": 0, "size": 24, "sort": "IdDesc", "auctionType": "All", "owner": ronin_address, "criteria": {"region": None, "parts": None, "bodyShapes": None, "classes": None, "stages": None, "numMystic": None, "pureness": None, "title": None, "breedable": None, "breedCount": None, "hp":[],"skill":[],"speed":[],"morale":[]}},"query":"query GetAxieBriefList($auctionType: AuctionType, $criteria: AxieSearchCriteria, $from: Int, $sort: SortBy, $size: Int, $owner: String) {\n  axies(auctionType: $auctionType, criteria: $criteria, from: $from, sort: $sort, size: $size, owner: $owner) {\n    total\n    results {\n      ...AxieBrief\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment AxieBrief on Axie {\n  id\n  name\n  stage\n  class\n  breedCount\n  image\n  title\n  battleInfo {\n    banned\n    __typename\n  }\n  auction {\n    currentPrice\n    currentPriceUSD\n    __typename\n  }\n  parts {\n    id\n    name\n    class\n    type\n    specialGenes\n    __typename\n  }\n  __typename\n}\n"}
 		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
@@ -290,6 +320,21 @@ class pyaxie(object):
 		"""
 		data = self.get_axie_detail(axie_id)
 		return data['class']
+
+	def get_scholars_axies_links(self):
+		"""
+		Get a list of links of all the axies in your scholars accounts
+		:return: A list of axie links
+		"""
+		l = list()
+		for account in self.config['scholars']:
+			ronin = self.config['scholars'][account]['ronin_address']
+			private = self.config['scholars'][account]['private_key']
+			scholar = pyaxie(ronin, private)
+			axie_list = scholar.get_axie_list(ronin)
+			for a in axie_list:
+				l.append(scholar.axie_link(a['id']))
+		return l
 
 	def rename_axie(self, axie_id, new_name):
 		"""
@@ -425,28 +470,36 @@ class pyaxie(object):
 		self.slp_contract = contract
 		return contract
 
-	def get_claimed_slp(self, address):
+	def get_claimed_slp(self, address=''):
 		"""
 		:param address: Ronin address to check
 		:return: The amount of claimed SLP
 		"""
-		address = w3.toChecksumAddress(address)
-		return int(self.slp_contract.functions.balanceOf(address).call())
+		if address == '':
+			address = self.ronin_address
+		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1",
+								headers=self.headers,
+								data="")
+		try:
+			data = json.loads(response.text)
+		except ValueError as e:
+			return e
+		return int(data['blockchain_related']['balance'])
 
-	def get_unclaimed_slp(self, address):
+	def get_unclaimed_slp(self, address=''):
 		"""
 		:param address: Ronin address to check
 		:return: The amount of unclaimed SLP
 		"""
+		if address == '':
+			address = self.ronin_address
 		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1",
 								headers=self.headers,
 								data="")
-
-		if response.status_code != 200:
-			print(response.text)
-		assert response.status_code == 200
-
-		result = response.json()
+		try:
+			result = response.json()
+		except ValueError as e:
+			return e
 		total = int(result["total"])
 		last_claimed_item_at = datetime.datetime.utcfromtimestamp(int(result["last_claimed_item_at"]))
 
@@ -459,6 +512,7 @@ class pyaxie(object):
 		Claim SLP on the account.
 		:return: Transaction of the claim
 		"""
+		print("\nClaiming SLP for : ", self.name)
 		slp_claim = {
 			'address': self.ronin_address,
 			'private_key': self.private_key,
@@ -473,7 +527,7 @@ class pyaxie(object):
 		if response.status_code != 200:
 			print(response.text)
 			return
-		assert response.status_code == 200
+
 		result = response.json()["blockchain_related"]["signature"]
 		checksum_address = w3.toChecksumAddress(self.ronin_address)
 		nonce = self.ronin_web3.eth.get_transaction_count(checksum_address)
@@ -492,20 +546,23 @@ class pyaxie(object):
 		Transfer SLP from pyaxie ronin address to the to_address
 		:param to_address: Receiver of the SLP. Format : 0x
 		:param amount: Amount of SLP to send
-		:return:
+		:return: Transaction hash
 		"""
-		transfer_txn = self.slp_contract.functions.transfer(to_address, amount).buildTransaction({
+		if amount < 1 or len(to_address) < 20:
+			return {"error": "Make sure that the amount is not under 1 and a to_address is correctly set."}
+
+		transfer_txn = self.slp_contract.functions.transfer(w3.toChecksumAddress(to_address), amount).buildTransaction({
 			'chainId': 2020,
 			'gas': 100000,
 			'gasPrice': Web3.toWei('0', 'gwei'),
-			'nonce': Web3.eth.get_transaction_count(w3.toChecksumAddress(self.ronin_address)),
+			'nonce': self.ronin_web3.eth.get_transaction_count(w3.toChecksumAddress(self.ronin_address))
 		})
 		private_key = bytearray.fromhex(self.private_key.replace("0x", ""))
 		signed_txn = self.ronin_web3.eth.account.sign_transaction(transfer_txn, private_key=private_key)
 		self.ronin_web3.eth.send_raw_transaction(signed_txn.rawTransaction)
-		return self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))  # Returns transaction hash.
+		return self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))
 
-	def make_transaction(self):
+	def payout(self):
 		"""
 		Send money to the scholar and to the manager/academy
 		:return: List of 2 transactions hash : scholar and manager
@@ -515,13 +572,23 @@ class pyaxie(object):
 		scholar_payout_amount = math.ceil(slp_balance * self.payout_percentage)
 		academy_payout_amount = slp_balance - scholar_payout_amount
 
+		if scholar_payout_amount < 1 or academy_payout_amount < 1:
+			return "Nothing to send."
+
 		try:
+			print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
 			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
+			time.sleep(10)
+		except ValueError as e:
+			return e
+
+		try:
+			print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
 			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
+			time.sleep(10)
 		except ValueError as e:
 			return e
 		return txns
-
 
 
 
