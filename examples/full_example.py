@@ -1,9 +1,6 @@
 """
 Here is a demonstration on how to use the library.
-You will find a test of every functions consecutively.
-
-The function names starting with 'get_' are using http request
-The other are working locally but you have to save_axie()
+You will find a test of every functions present in pyaxie.py consecutively.
 """
 
 import yaml # To work with our yaml secret file
@@ -169,7 +166,8 @@ pprint(claimed_slp)
 print("\n############### Get unclaimed SLP ##################")
 unclaimed_slp = pyax.get_unclaimed_slp(pyax.ronin_address)
 pprint(unclaimed_slp)
-"""
+
+
 # Claim SLP for all the scholars accounts in secret.yaml and send SLP to you and your scholar
 print("\n############### Payout ##################")
 
@@ -178,4 +176,11 @@ for account in config['scholars']:
     scholar = pyaxie(config['scholars'][account]['ronin_address'], config['scholars'][account]['private_key'])
     pprint(scholar.claim_slp())
     pprint(scholar.payout())
+
+# Send 1 SLP from the pyax object (your first scholar in the list) to your personal address
+print("\n############### Send 1 SLP ##################")
+tx = pyax.transfer_slp(config['personal']['ronin_address'], 1)
+pprint(tx)
+"""
+
 

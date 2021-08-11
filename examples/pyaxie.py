@@ -226,10 +226,10 @@ class pyaxie(object):
 		try:
 			json_data = json.loads(r.text)
 			if not json_data['success']:
-				return {'mmr': 0, 'rank': 0}
+				return {'mmr': 'internal-server-error', 'rank': 'internal-server-error'}
 		except ValueError as e:
 			return e
-		return {'mmr': int(json_data['items'][1]['elo']), 'rank': int(json_data['items'][1]['rank'])}
+		return {'mmr': json_data['items'][1]['elo'], 'rank': json_data['items'][1]['rank']}
 
 
 
