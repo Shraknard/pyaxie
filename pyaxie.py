@@ -510,6 +510,10 @@ class pyaxie(object):
 		:return: Transaction of the claim
 		"""
 		print("\nClaiming SLP for : ", self.name)
+
+		if datetime.datetime.utcnow() + timedelta(days=-14) < datetime.datetime.fromtimestamp(self.get_last_claim()):
+			return 'Too soon to claim'
+
 		slp_claim = {
 			'address': self.ronin_address,
 			'private_key': self.private_key,
@@ -561,7 +565,7 @@ class pyaxie(object):
 
 	def payout(self):
 		"""
-		Send money to the scholar and to the manager/academy
+		Send money to the scholar and to the manager/academy or directly to manager if manager called
 		:return: List of 2 transactions hash : scholar and manager
 		"""
 		txns = list()
@@ -572,17 +576,27 @@ class pyaxie(object):
 		if scholar_payout_amount < 1 or academy_payout_amount < 1:
 			return "Nothing to send."
 
+		if self.ronin_address == self.config['personal']['ronin_address']:
+			amount = scholar_payout_amount + academy_payout_amount
+			try:
+				print("Sending all the SLP : {} to you : {} ".format(amount,  self.ronin_address))
+				txns.append(str(self.transfer_slp(self.ronin_address, amount)))
+				time.sleep(2)
+			except ValueError as e:
+				return e
+			return txns
+
 		try:
 			print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
 			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
-			time.sleep(10)
+			time.sleep(2)
 		except ValueError as e:
 			return e
 
 		try:
 			print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
 			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
-			time.sleep(10)
+			time.sleep(2)
 		except ValueError as e:
 			return e
 		return txns
