@@ -25,6 +25,6 @@ for r in ranks:
     print("{} | {}".format(r['name'], r['rank']))
 
 print("\nSCHOLAR SORTED BY MMR\n")
-mmrs = sorted(l, key=lambda k: k['mmr'])
+mmrs = reversed(sorted(l, key=lambda k: k['mmr']))
 for m in mmrs:
     print("{} | {}".format(m['name'], m['mmr']))

@@ -131,8 +131,9 @@ class pyaxie(object):
 		Function to create a QRCode from an access_token
 		"""
 		img = qrcode.make(self.access_token)
-		img.save('QRCode-' + str(datetime.datetime.now()) + '.png')
-		return
+		name = 'QRCode-' + str(datetime.datetime.now()) + '.png'
+		img.save(name)
+		return name
 
 	#################################
 	# Account interaction functions #
@@ -322,21 +323,6 @@ class pyaxie(object):
 		data = self.get_axie_detail(axie_id)
 		return data['class']
 
-	def get_scholars_axies_links(self):
-		"""
-		Get a list of links of all the axies in your scholars accounts
-		:return: A list of axie links
-		"""
-		l = list()
-		for account in self.config['scholars']:
-			ronin = self.config['scholars'][account]['ronin_address']
-			private = self.config['scholars'][account]['private_key']
-			scholar = pyaxie(ronin, private)
-			axie_list = scholar.get_axie_list(ronin)
-			for a in axie_list:
-				l.append(scholar.axie_link(a['id']))
-		return l
-
 	def rename_axie(self, axie_id, new_name):
 		"""
 		Rename an axie
@@ -494,19 +480,29 @@ class pyaxie(object):
 		"""
 		if address == '':
 			address = self.ronin_address
-		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1",
-								headers=self.headers,
-								data="")
+		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1", headers=self.headers, data="")
 		try:
 			result = response.json()
 		except ValueError as e:
 			return e
-		total = int(result["total"])
-		last_claimed_item_at = datetime.datetime.utcfromtimestamp(int(result["last_claimed_item_at"]))
+		return int(result["total"] - result['blockchain_related']['balance'])
 
-		if datetime.datetime.utcnow() + timedelta(days=-14) < last_claimed_item_at:
-			total = 0
-		return total
+	def get_last_claim(self, address=''):
+		"""
+		Return the last time SLP was claimed for this account
+		:param address: Ronin address
+		:return: Time in sec
+		"""
+		if address == '':
+			address = self.ronin_address
+
+		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1", headers=self.headers, data="")
+		try:
+			result = response.json()
+		except ValueError as e:
+			return e
+
+		return int(result["last_claimed_item_at"])
 
 	def claim_slp(self):
 		"""
@@ -519,7 +515,7 @@ class pyaxie(object):
 			'private_key': self.private_key,
 			'state': {"signature": None}
 		}
-		access_token = self.get_access_token()
+		access_token = self.access_token
 		custom_headers = self.headers.copy()
 		custom_headers["authorization"] = f"Bearer {access_token}"
 		response = requests.post(f"https://game-api.skymavis.com/game-api/clients/{self.ronin_address}/items/1/claim",

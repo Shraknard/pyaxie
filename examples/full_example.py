@@ -17,8 +17,8 @@ with open("secret.yaml", "r") as file:
     config = yaml.safe_load(file)
 
 # Get 1st scholar datas from config
-ronin_address = config['scholars'][0]['ronin_address']
-private_key = config['scholars'][0]['private_key']
+ronin_address = config['scholars']['joemichael']['ronin_address']
+private_key = config['scholars']['joemichael']['private_key']
 
 # Get a random axie ID to test the functions
 rnd_id = random.randint(10000, 1000000)
@@ -183,4 +183,6 @@ tx = pyax.transfer_slp(config['personal']['ronin_address'], 1)
 pprint(tx)
 """
 
-
+print("Test claim for 1 scholar : ")
+scholar = pyaxie(config['scholars']['joemichael']['ronin_address'], config['scholars']['joemichael']['private_key'])
+pprint(scholar.claim_slp())
