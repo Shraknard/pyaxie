@@ -1,0 +1,7 @@
+eth_account==0.5.4
+web3==5.21.0
+qrcode==7.1
+discord.py==1.7.3
+requests==2.22.0
+discord==1.7.3
+PyYAML==5.4.1
