@@ -576,16 +576,6 @@ class pyaxie(object):
 		if scholar_payout_amount < 1 or academy_payout_amount < 1:
 			return "Nothing to send."
 
-		if self.ronin_address == self.config['personal']['ronin_address']:
-			amount = scholar_payout_amount + academy_payout_amount
-			try:
-				print("Sending all the SLP : {} to you : {} ".format(amount,  self.ronin_address))
-				txns.append(str(self.transfer_slp(self.ronin_address, amount)))
-				time.sleep(2)
-			except ValueError as e:
-				return e
-			return txns
-
 		try:
 			print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
 			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
