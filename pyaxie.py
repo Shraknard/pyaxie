@@ -485,6 +485,8 @@ class pyaxie(object):
 			result = response.json()
 		except ValueError as e:
 			return e
+		if result is None:
+			return 0
 		return int(result["total"] - result['blockchain_related']['balance'])
 
 	def get_last_claim(self, address=''):
