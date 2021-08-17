@@ -489,7 +489,11 @@ class pyaxie(object):
 			return e
 		if result is None:
 			return 0
-		return int(result["total"] - result['blockchain_related']['balance'])
+
+		balance = result['blockchain_related']['balance']
+		if balance is None:
+			balance = 0
+		return int(result["total"] - balance)
 
 	def get_last_claim(self, address=''):
 		"""
@@ -582,22 +586,33 @@ class pyaxie(object):
 		if scholar_payout_amount < 1 or academy_payout_amount < 1:
 			return "Nothing to send."
 
-		try:
-			print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
-			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
-			time.sleep(10)
-		except ValueError as e:
-			pprint(e)
-			return e
+		if self.payout_percentage == 0:
+			try:
+				print("Sending all the {} SLP to you : {} ".format(academy_payout_amount, self.config['personal']['ronin_address']))
+				txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount + scholar_payout_amount)))
+				time.sleep(10)
+			except ValueError as e:
+				pprint(e)
+				return e
+			return txns
+		else:
+			try:
+				print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
+				txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
+				time.sleep(10)
+			except ValueError as e:
+				pprint(e)
+				return e
 
-		try:
-			print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
-			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
-			time.sleep(10)
-		except ValueError as e:
-			pprint(e)
-			return e
+			try:
+				print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
+				txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
+				time.sleep(10)
+			except ValueError as e:
+				pprint(e)
+				return e
 		return txns
+
 
 
 
