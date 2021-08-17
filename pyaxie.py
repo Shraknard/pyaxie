@@ -489,7 +489,7 @@ class pyaxie(object):
 			return e
 		if result is None:
 			return 0
-		return int(result["total"])
+		return int(result["total"] - result['blockchain_related']['balance'])
 
 	def get_last_claim(self, address=''):
 		"""
