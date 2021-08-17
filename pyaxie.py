@@ -73,18 +73,16 @@ class pyaxie(object):
 			return e
 		return json_data['data']['createRandomMessage']
 
-	def sign_message(self, raw_message, private_key=''):
+	def sign_message(self, raw_message, private=''):
 		"""
 		Sign a raw message
 		:param raw_message: The raw message from get_raw_message()
-		:param private_key: The private key of the account
+		:param private: The private key of the account
 		:return: The signed message
 		"""
-		if private_key:
-			key = private_key
-		else:
-			key = self.private_key
-		pk = bytearray.fromhex(key)
+		if not private:
+			private = self.private_key
+		pk = bytearray.fromhex(private)
 		message = encode_defunct(text=raw_message)
 		hex_signature = w3.eth.account.sign_message(message, private_key=pk)
 		return hex_signature
@@ -471,7 +469,11 @@ class pyaxie(object):
 			data = json.loads(response.text)
 		except ValueError as e:
 			return e
-		return int(data['blockchain_related']['balance'])
+
+		balance = data['blockchain_related']['balance']
+		if balance is None:
+			return 0
+		return int(balance)
 
 	def get_unclaimed_slp(self, address=''):
 		"""
@@ -487,7 +489,7 @@ class pyaxie(object):
 			return e
 		if result is None:
 			return 0
-		return int(result["total"] - result['blockchain_related']['balance'])
+		return int(result["total"])
 
 	def get_last_claim(self, address=''):
 		"""
@@ -532,6 +534,8 @@ class pyaxie(object):
 			return
 
 		result = response.json()["blockchain_related"]["signature"]
+		if result is None:
+			return 'Nothing to claim'
 		checksum_address = w3.toChecksumAddress(self.ronin_address)
 		nonce = self.ronin_web3.eth.get_transaction_count(checksum_address)
 		slp_claim['state']["signature"] = result["signature"].replace("0x", "")
@@ -571,7 +575,7 @@ class pyaxie(object):
 		:return: List of 2 transactions hash : scholar and manager
 		"""
 		txns = list()
-		slp_balance = self.get_claimed_slp(self.ronin_address)
+		slp_balance = self.get_claimed_slp(self.ronin_address) - 1
 		scholar_payout_amount = math.ceil(slp_balance * self.payout_percentage)
 		academy_payout_amount = slp_balance - scholar_payout_amount
 
@@ -581,15 +585,17 @@ class pyaxie(object):
 		try:
 			print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
 			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
-			time.sleep(2)
+			time.sleep(10)
 		except ValueError as e:
+			pprint(e)
 			return e
 
 		try:
 			print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
 			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
-			time.sleep(2)
+			time.sleep(10)
 		except ValueError as e:
+			pprint(e)
 			return e
 		return txns
 
