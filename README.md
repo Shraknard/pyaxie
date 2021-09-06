@@ -11,6 +11,8 @@ Python library to interact with Axie Infinity and Ronin.
 
 Please guys, make the code of your tools public so everybody can learn from it !
 
+If you encounter a problem or have a question, you can join the discord server : https://discord.gg/gqaSv2PZbF
+
 ## Work in progress
 - Some of the graphql are missing as functions.
 - More pre-made script are coming.
