@@ -6,15 +6,14 @@ import os
 import datetime
 import time
 import math
-import sys
-from datetime import timedelta
+import pyaxie_utils
 
-from web3 import Web3
+from datetime import timedelta, date
+from web3 import Web3, exceptions
 from web3.auto import w3
 from eth_account.messages import encode_defunct
-from collections import namedtuple
 from pprint import pprint
-
+from pycoingecko import CoinGeckoAPI
 
 class pyaxie(object):
 
@@ -28,10 +27,11 @@ class pyaxie(object):
 			config = yaml.safe_load(file)
 
 		self.config = config
-		self.ronin_address = ronin_address
-		self.private_key = private_key
+		self.ronin_address = ronin_address.replace('ronin:', '0x')
+		self.private_key = private_key.replace('0x', '')
 		self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36', 'authorization': ""}
 		self.url = "https://axieinfinity.com/graphql-server-v2/graphql"
+		self.url_api = config['url_api']
 		self.access_token = self.get_access_token()
 		self.account_id = 0
 		self.email = ""
@@ -40,20 +40,19 @@ class pyaxie(object):
 		self.axie_list_path = config['paths']['axie_list_path']
 		self.slp_track_path = config['paths']['slp_track_path']
 		self.slp_abi_path = 'slp_abi.json'
+		self.axie_abi_path = 'slp_abi.json'
 		self.slp_contract = self.get_slp_contract(self.ronin_web3, self.slp_abi_path)
 		self.name = "you"
 
 		for scholar in config['scholars']:
 			if config['scholars'][scholar]['ronin_address'] == ronin_address:
 				self.payout_percentage = config['scholars'][scholar]['payout_percentage']
-				self.personal_ronin = config['scholars'][scholar]['personal_ronin']
+				self.personal_ronin = config['scholars'][scholar]['personal_ronin'].replace('ronin:', '0x')
 				self.name = scholar
 				break
 			else:
 				self.payout_percentage = 0
 				self.personal_ronin = None
-
-
 
 	############################
 	# Authentication functions #
@@ -83,9 +82,12 @@ class pyaxie(object):
 		if not private:
 			private = self.private_key
 		pk = bytearray.fromhex(private)
-		message = encode_defunct(text=raw_message)
-		hex_signature = w3.eth.account.sign_message(message, private_key=pk)
-		return hex_signature
+		try:
+			message = encode_defunct(text=raw_message)
+			hex_signature = w3.eth.account.sign_message(message, private_key=pk)
+			return hex_signature
+		except 'JSONDecodeError' as e:
+			return e + " | Maybe a problem with the axie request"
 
 	def submit_signature(self, signed_message, raw_message, ronin_address=''):
 		"""
@@ -119,7 +121,11 @@ class pyaxie(object):
 			return
 		msg = self.get_raw_message()
 		signed = self.sign_message(msg)
-		token = self.submit_signature(signed, msg)
+		if "JSONDecodeError" in signed:
+			print("Error getting the signed message, trying again.")
+			token = self.get_access_token()
+		else:
+			token = self.submit_signature(signed, msg)
 		self.access_token = token
 		self.headers['authorization'] = 'Bearer ' + token
 		return token
@@ -162,9 +168,9 @@ class pyaxie(object):
 		except ValueError as e:
 			return e['data']['profile']
 
-		self.account_id = json_data['accountId']
-		self.email = json_data['email']
-		self.name = json_data['name']
+		self.account_id = json_data['data']['profile']['accountId']
+		self.email = json_data['data']['profile']['email']
+		self.name = json_data['data']['profile']['name']
 		return json_data
 
 	def get_activity_log(self):
@@ -196,6 +202,17 @@ class pyaxie(object):
 			return e
 		return json_data['data']['publicProfileWithRoninAddress']['name']
 
+	def rename_account(self, new_name):
+		body = {"operationName": "RenameAxie", "variables": {"axieId": str(new_name),"name": str(new_name) }, "query": "mutation RenameAxie($axieId: ID!, $name: String!) {\n  renameAxie(axieId: $axieId, name: $name) {\n    result\n    __typename\n  }\n}\n"}
+		try:
+			r = requests.post(self.url, headers=self.headers, json=body)
+			json_data = json.loads(r.text)
+		except ValueError as e:
+			return e
+		if json_data['data'] is None:
+			return json_data['errors']['message']
+		return json_data['data']['renameAxie']['result']
+
 	def get_public_profile(self, ronin_address=''):
 		"""
 		Get infos about the given ronin address
@@ -220,17 +237,30 @@ class pyaxie(object):
 		if ronin_address == '':
 			ronin_address = self.ronin_address
 		params = {"client_id": ronin_address, "offset": 0, "limit": 0}
-		r = requests.get("https://game-api.skymavis.com/game-api/last-season-leaderboard", params=params)
 
-		try:
-			json_data = json.loads(r.text)
-			if not json_data['success']:
-				return {'mmr': 0, 'rank': 0}
-		except ValueError as e:
-			return e
-		return {'mmr': int(json_data['items'][1]['elo']), 'rank': int(json_data['items'][1]['rank'])}
+		# Try multiple times to avoid return 0
+		for i in range(0, 5):
+			try:
+				r = requests.get(self.url_api + "leaderboard", params=params)
+				json_data = json.loads(r.text)
+				if json_data['success']:
+					return {'mmr': int(json_data['items'][1]['elo']), 'rank': int(json_data['items'][1]['rank'])}
+			except ValueError as e:
+				return e
+		return {'mmr': 0, 'rank': 0}
 
 
+	def get_daily_slp(self):
+		"""
+		Get the daily SLP ratio based on SLP farmed between now and last claim
+		:return: Dict with ratio and date
+		"""
+		unclaimed = self.get_unclaimed_slp()
+		t = datetime.datetime.fromtimestamp(self.get_last_claim())
+		days = (t - datetime.datetime.utcnow()).days * -1
+		if days <= 0:
+			return unclaimed
+		return int(unclaimed / days)
 
 	#############################################
 	# Functions to interact with axies from web #
@@ -245,12 +275,40 @@ class pyaxie(object):
 		if ronin_address == '':
 			ronin_address = self.ronin_address
 		body = {"operationName": "GetAxieBriefList", "variables": {"from": 0, "size": 24, "sort": "IdDesc", "auctionType": "All", "owner": ronin_address, "criteria": {"region": None, "parts": None, "bodyShapes": None, "classes": None, "stages": None, "numMystic": None, "pureness": None, "title": None, "breedable": None, "breedCount": None, "hp":[],"skill":[],"speed":[],"morale":[]}},"query":"query GetAxieBriefList($auctionType: AuctionType, $criteria: AxieSearchCriteria, $from: Int, $sort: SortBy, $size: Int, $owner: String) {\n  axies(auctionType: $auctionType, criteria: $criteria, from: $from, sort: $sort, size: $size, owner: $owner) {\n    total\n    results {\n      ...AxieBrief\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment AxieBrief on Axie {\n  id\n  name\n  stage\n  class\n  breedCount\n  image\n  title\n  battleInfo {\n    banned\n    __typename\n  }\n  auction {\n    currentPrice\n    currentPriceUSD\n    __typename\n  }\n  parts {\n    id\n    name\n    class\n    type\n    specialGenes\n    __typename\n  }\n  __typename\n}\n"}
-		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
+			r = requests.post(self.url, headers=self.headers, json=body)
 			json_data = json.loads(r.text)
 		except ValueError as e:
 			return e
 		return json_data['data']['axies']['results']
+
+	def get_all_axie_list(self):
+		"""
+		Get informations about the axies in all the accounts
+		:return: List with all axies datas
+		"""
+		res = list()
+		for account in self.config['scholars']:
+			axies = self.get_axie_list(self.config['scholars'][account]['ronin_address'])
+			for axie in axies:
+				res.append(axie)
+		for axie in self.get_axie_list(self.config['personal']['ronin_address']):
+			res.append(axie)
+		return res
+
+	def get_all_axie_class(self, axie_class, axies_datas=[]):
+		"""
+		Return all the axies of a specific class present in the scholarship
+		:param axie_class: Plant, Bast, Bird, etc...
+		:return: List of axie object of the specific class
+		"""
+		if not axies_datas:
+			axies_datas = self.get_all_axie_list()
+		l = list()
+		for axie in axies_datas:
+			if axie['class'] is not None and axie['class'].lower() == axie_class.lower():
+				l.append(axie)
+		return l
 
 	def get_axie_image(self, axie_id):
 		"""
@@ -259,12 +317,58 @@ class pyaxie(object):
 		:return: Link to the image
 		"""
 		body = {"operationName": "GetAxieMetadata", "variables": {"axieId": axie_id}, "query": "query GetAxieMetadata($axieId: ID!) {\n  axie(axieId: $axieId) {\n    id\n    image\n    __typename\n  }\n}\n"}
-		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
+			r = requests.post(self.url, headers=self.headers, json=body)
 			json_data = json.loads(r.text)
 		except ValueError as e:
 			return e
 		return json_data['data']['axie']['image']
+
+	def get_number_of_axies(self):
+		"""
+		Get the number of axies in the account
+		:return: the number of axies
+		"""
+		axies = self.get_axie_list()
+		return len(axies)
+
+	def download_axie_image(self, axie_id):
+		"""
+		Download the image of an axie and return the path
+		:param axie_id: ID of the axie
+		:return: Path of the image
+		"""
+		axie_id = str(axie_id)
+		path = './img/axies/' + axie_id + '.png'
+		dir = os.path.join(".", "img", "axies")
+		if not os.path.exists(dir):
+			os.mkdir(dir)
+
+		if os.path.exists(path):
+			return path
+
+		img_data = requests.get('https://storage.googleapis.com/assets.axieinfinity.com/axies/'+axie_id+'/axie/axie-full-transparent.png').content
+		if len(img_data) <= 500:
+			return './img/axies/egg.png'
+		with open(path, 'ab') as img:
+			img.write(img_data)
+		return path
+
+	def get_axies_imageline(self):
+		"""
+		Get the path to the picture containing the 3 axies merged horizontally
+		:return: Path of the new picture
+		"""
+		try:
+			axies = self.get_axie_list()
+			l = list()
+			for axie in axies:
+				l.append(self.download_axie_image(axie['id']))
+			if len(l) < 3:
+				return 'Error: not enough axies on the account'
+		except ValueError as e:
+			return e
+		return pyaxie_utils.merge_images(l[0], l[1], l[2], self.name)
 
 	def get_axie_detail(self, axie_id):
 		"""
@@ -273,11 +377,11 @@ class pyaxie(object):
 		:return: A dict with the adatas of the axie
 		"""
 		body = {"operationName": "GetAxieDetail", "variables": {"axieId": axie_id}, "query": "query GetAxieDetail($axieId: ID!) {\n  axie(axieId: $axieId) {\n    ...AxieDetail\n    __typename\n  }\n}\n\nfragment AxieDetail on Axie {\n  id\n  image\n  class\n  chain\n  name\n  genes\n  owner\n  birthDate\n  bodyShape\n  class\n  sireId\n  sireClass\n  matronId\n  matronClass\n  stage\n  title\n  breedCount\n  level\n  figure {\n    atlas\n    model\n    image\n    __typename\n  }\n  parts {\n    ...AxiePart\n    __typename\n  }\n  stats {\n    ...AxieStats\n    __typename\n  }\n  auction {\n    ...AxieAuction\n    __typename\n  }\n  ownerProfile {\n    name\n    __typename\n  }\n  battleInfo {\n    ...AxieBattleInfo\n    __typename\n  }\n  children {\n    id\n    name\n    class\n    image\n    title\n    stage\n    __typename\n  }\n  __typename\n}\n\nfragment AxieBattleInfo on AxieBattleInfo {\n  banned\n  banUntil\n  level\n  __typename\n}\n\nfragment AxiePart on AxiePart {\n  id\n  name\n  class\n  type\n  specialGenes\n  stage\n  abilities {\n    ...AxieCardAbility\n    __typename\n  }\n  __typename\n}\n\nfragment AxieCardAbility on AxieCardAbility {\n  id\n  name\n  attack\n  defense\n  energy\n  description\n  backgroundUrl\n  effectIconUrl\n  __typename\n}\n\nfragment AxieStats on AxieStats {\n  hp\n  speed\n  skill\n  morale\n  __typename\n}\n\nfragment AxieAuction on Auction {\n  startingPrice\n  endingPrice\n  startingTimestamp\n  endingTimestamp\n  duration\n  timeLeft\n  currentPrice\n  currentPriceUSD\n  suggestedPrice\n  seller\n  listingIndex\n  state\n  __typename\n}\n"}
-		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
+			r = requests.post(self.url, headers=self.headers, json=body)
 			json_data = json.loads(r.text)
 		except ValueError as e:
-			return e
+			return None
 		return json_data['data']['axie']
 
 	def get_axie_name(self, axie_id):
@@ -287,8 +391,8 @@ class pyaxie(object):
 		:return: Name of the axie
 		"""
 		body = {"operationName": "GetAxieName", "variables": {"axieId": axie_id}, "query": "query GetAxieName($axieId: ID!) {\n  axie(axieId: $axieId) {\n    ...AxieName\n    __typename\n  }\n}\n\nfragment AxieName on Axie {\n  name\n  __typename\n}\n"}
-		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
+			r = requests.post(self.url, headers=self.headers, json=body)
 			json_data = json.loads(r.text)
 		except ValueError as e:
 			return e
@@ -321,6 +425,19 @@ class pyaxie(object):
 		data = self.get_axie_detail(axie_id)
 		return data['class']
 
+	def get_axie_children(self, id=0, axie_data={}):
+		"""
+		Get the children of an axie on given id OR given axie datas
+		:param id: id of the axie
+		:param axie_data: axie_datas
+		:return: list of id of the children
+		"""
+		axie = self.get_axie_detail(id) if axie_data == {} else axie_data
+		l = list()
+		for children in axie['children']:
+			l.append(int(children['id']))
+		return l
+
 	def rename_axie(self, axie_id, new_name):
 		"""
 		Rename an axie
@@ -329,13 +446,14 @@ class pyaxie(object):
 		:return: True/False or error
 		"""
 		body = {"operationName": "RenameAxie", "variables": {"axieId": str(axie_id),"name": str(new_name) }, "query": "mutation RenameAxie($axieId: ID!, $name: String!) {\n  renameAxie(axieId: $axieId, name: $name) {\n    result\n    __typename\n  }\n}\n"}
-		r = requests.post(self.url, headers=self.headers, json=body)
 		try:
+			r = requests.post(self.url, headers=self.headers, json=body)
 			json_data = json.loads(r.text)
+			pprint(json_data)
 		except ValueError as e:
 			return e
 		if json_data['data'] is None:
-			return json_data['errors']['message']
+			return False
 		return json_data['data']['renameAxie']['result']
 
 	###############################################
@@ -422,7 +540,7 @@ class pyaxie(object):
 	def axie_link(self, axie_id):
 		"""
 		Return an URL to the axie page
-		:param axie_id: String of the axie ID
+		:param axie_id: Id of the axie
 		:return: URL of the axie
 		"""
 		url = 'https://marketplace.axieinfinity.com/axie/'
@@ -455,6 +573,18 @@ class pyaxie(object):
 		self.slp_contract = contract
 		return contract
 
+	def get_axie_contract(self, ronin_web3):
+		slp_contract_address = "0x32950db2a7164ae833121501c797d79e7b79d74c"
+		with open(self.axie_abi_path) as f:
+			try:
+				slp_abi = json.load(f)
+			except ValueError as e:
+				return e
+		contract = ronin_web3.eth.contract(address=w3.toChecksumAddress(slp_contract_address), abi=slp_abi)
+		self.slp_contract = contract
+		return contract
+
+
 	def get_claimed_slp(self, address=''):
 		"""
 		:param address: Ronin address to check
@@ -462,10 +592,8 @@ class pyaxie(object):
 		"""
 		if address == '':
 			address = self.ronin_address
-		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1",
-								headers=self.headers,
-								data="")
 		try:
+			response = requests.get(self.url_api + f"clients/{address}/items/1", headers=self.headers, data="")
 			data = json.loads(response.text)
 		except ValueError as e:
 			return e
@@ -473,6 +601,7 @@ class pyaxie(object):
 		balance = data['blockchain_related']['balance']
 		if balance is None:
 			return 0
+
 		return int(balance)
 
 	def get_unclaimed_slp(self, address=''):
@@ -482,18 +611,26 @@ class pyaxie(object):
 		"""
 		if address == '':
 			address = self.ronin_address
-		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1", headers=self.headers, data="")
 		try:
+			response = requests.get(self.url_api + f"clients/{address}/items/1", headers=self.headers, data="")
 			result = response.json()
 		except ValueError as e:
 			return e
 		if result is None:
 			return 0
 
-		balance = result['blockchain_related']['balance']
+		balance = -1
+		if 'blockchain_related' in result:
+			balance = result['blockchain_related']['balance']
+		else:
+			return balance
 		if balance is None:
 			balance = 0
-		return int(result["total"] - balance)
+
+		res = result["total"]
+		if res is None:
+			res = 0
+		return int(res - balance)
 
 	def get_last_claim(self, address=''):
 		"""
@@ -504,8 +641,8 @@ class pyaxie(object):
 		if address == '':
 			address = self.ronin_address
 
-		response = requests.get(f"https://game-api.skymavis.com/game-api/clients/{address}/items/1", headers=self.headers, data="")
 		try:
+			response = requests.get(self.url_api + f"clients/{address}/items/1", headers=self.headers, data="")
 			result = response.json()
 		except ValueError as e:
 			return e
@@ -520,7 +657,7 @@ class pyaxie(object):
 		print("\nClaiming SLP for : ", self.name)
 
 		if datetime.datetime.utcnow() + timedelta(days=-14) < datetime.datetime.fromtimestamp(self.get_last_claim()):
-			return 'Too soon to claim'
+			return 'Error: Too soon to claim or already claimed'
 
 		slp_claim = {
 			'address': self.ronin_address,
@@ -530,8 +667,7 @@ class pyaxie(object):
 		access_token = self.access_token
 		custom_headers = self.headers.copy()
 		custom_headers["authorization"] = f"Bearer {access_token}"
-		response = requests.post(f"https://game-api.skymavis.com/game-api/clients/{self.ronin_address}/items/1/claim",
-								 headers=custom_headers, json="")
+		response = requests.post(self.url_api + f"clients/{self.ronin_address}/items/1/claim", headers=custom_headers, json="")
 
 		if response.status_code != 200:
 			print(response.text)
@@ -539,18 +675,18 @@ class pyaxie(object):
 
 		result = response.json()["blockchain_related"]["signature"]
 		if result is None:
-			return 'Nothing to claim'
+			return 'Error: Nothing to claim'
+
 		checksum_address = w3.toChecksumAddress(self.ronin_address)
 		nonce = self.ronin_web3.eth.get_transaction_count(checksum_address)
 		slp_claim['state']["signature"] = result["signature"].replace("0x", "")
 		claim_txn = self.slp_contract.functions.checkpoint(checksum_address, result["amount"], result["timestamp"],
-													  slp_claim['state']["signature"]).buildTransaction(
-			{'gas': 1000000, 'gasPrice': 0, 'nonce': nonce})
-		signed_txn = self.ronin_web3.eth.account.sign_transaction(claim_txn, private_key=bytearray.fromhex(
-			self.private_key.replace("0x", "")))
+						slp_claim['state']["signature"]).buildTransaction({'gas': 1000000, 'gasPrice': 0, 'nonce': nonce})
+		signed_txn = self.ronin_web3.eth.account.sign_transaction(claim_txn, private_key=bytearray.fromhex(self.private_key.replace("0x", "")))
 
 		self.ronin_web3.eth.send_raw_transaction(signed_txn.rawTransaction)
-		return self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))
+		txn = self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))
+		return txn if self.wait_confirmation(txn) else "Error : Transaction " + str(txn) + "reverted by EVM (Ethereum Virtual machine)"
 
 	def transfer_slp(self, to_address, amount):
 		"""
@@ -559,8 +695,8 @@ class pyaxie(object):
 		:param amount: Amount of SLP to send
 		:return: Transaction hash
 		"""
-		if amount < 1 or len(to_address) < 20:
-			return {"error": "Make sure that the amount is not under 1 and a to_address is correctly set."}
+		if amount < 1 or not Web3.isAddress(to_address):
+			return {"error": "Make sure that the amount is not under 1 and the **to_address** is correct."}
 
 		transfer_txn = self.slp_contract.functions.transfer(w3.toChecksumAddress(to_address), amount).buildTransaction({
 			'chainId': 2020,
@@ -570,53 +706,267 @@ class pyaxie(object):
 		})
 		private_key = bytearray.fromhex(self.private_key.replace("0x", ""))
 		signed_txn = self.ronin_web3.eth.account.sign_transaction(transfer_txn, private_key=private_key)
+
 		self.ronin_web3.eth.send_raw_transaction(signed_txn.rawTransaction)
-		return self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))
+		txn = self.ronin_web3.toHex(self.ronin_web3.keccak(signed_txn.rawTransaction))
+		return txn if self.wait_confirmation(txn) else "Error : Transaction " + str(txn) + " reverted by EVM (Ethereum Virtual machine)"
+
+	def wait_confirmation(self, txn):
+		"""
+		Wait for a transaction to finish
+		:param txn: the transaction to wait
+		:return: True or False depending if transaction succeed
+		"""
+		while True:
+			try:
+				recepit = self.ronin_web3.eth.get_transaction_receipt(txn)
+				success = True if recepit["status"] == 1 else False
+				break
+			except exceptions.TransactionNotFound:
+				time.sleep(5)
+		return success
 
 	def payout(self):
 		"""
 		Send money to the scholar and to the manager/academy or directly to manager if manager called
 		:return: List of 2 transactions hash : scholar and manager
 		"""
+		self.claim_slp()
+
 		txns = list()
-		slp_balance = self.get_claimed_slp(self.ronin_address) - 1
+		slp_balance = self.get_claimed_slp()
 		scholar_payout_amount = math.ceil(slp_balance * self.payout_percentage)
 		academy_payout_amount = slp_balance - scholar_payout_amount
 
-		if scholar_payout_amount < 1 or academy_payout_amount < 1:
-			return "Nothing to send."
+		if slp_balance < 1:
+			return ["Error: Nothing to send.", "Error: Nothing to send."]
 
 		if self.payout_percentage == 0:
-			try:
-				print("Sending all the {} SLP to you : {} ".format(academy_payout_amount, self.config['personal']['ronin_address']))
-				txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount + scholar_payout_amount)))
-				time.sleep(10)
-			except ValueError as e:
-				pprint(e)
-				return e
+			print("Sending all the {} SLP to you : {} ".format(academy_payout_amount, self.config['personal']['ronin_address']))
+			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount + scholar_payout_amount)))
+			txns.append("Nothing to send to scholar")
 			return txns
 		else:
-			try:
-				print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
-				txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
-				time.sleep(10)
-			except ValueError as e:
-				pprint(e)
-				return e
+			print("Sending {} SLP to {} : {} ".format(academy_payout_amount, "You", self.config['personal']['ronin_address']))
+			txns.append(str(self.transfer_slp(self.config['personal']['ronin_address'], academy_payout_amount)))
 
-			try:
-				print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
-				txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
-				time.sleep(10)
-			except ValueError as e:
-				pprint(e)
-				return e
+			print("Sending {} SLP to {} : {} ".format(scholar_payout_amount, self.name, self.personal_ronin))
+			txns.append(str(self.transfer_slp(self.personal_ronin, scholar_payout_amount)))
 		return txns
 
+	def get_mint_burn_graph(self):
+		"""
+		Create a chart in /img with SLP burned/minted
+		:return: path of the image
+		"""
+		"""
+		try:
+			slp_supply = json.loads(requests.get("https://www.axieworld.com/api/charts/slp-issuance").content)
+			dates, mints, burns = ([],) * 3
+			today = date.today()
+			qc = QuickChart()
+			qc.width = 500
+			qc.height = 300
+			qc.device_pixel_ratio = 2.0
 
+			for i in range(0, 6):
+				dates.append(today) if i == 0 else dates.append(today - timedelta(days=i))
+				mints.append(round(slp_supply["data"]["minted"][-(i + 1)] / 1000000, 1))
+				burns.append(round(slp_supply["data"]["burned"][-(i + 1)] / 1000000, 1))
 
+			qc.config = {
+				"type": "bar",
+				"data": {
+					"labels": dates,
+					"datasets": [{
+						"label": 'Minted',
+						"backgroundColor": 'rgb(35, 90, 155)',
+						"stack": 'Stack 0',
+						"data": mints,
+					},
+						{
+							"label": 'Burned',
+							"backgroundColor": 'rgb(245, 158, 27)',
+							"stack": 'Stack 1',
+							"data": burns,
+						},
+					]
+				},
+				"options": {
+					"plugins": {
+						"datalabels": {
+							"anchor": 'end',
+							"align": 'top',
+							"color": '#fff',
+							"backgroundColor": 'rgba(54, 57, 63, 1.0)'
+						},
+					},
+					"title": {
+						"display": "true",
+						"text": "SLP minted vs burned (in millions)",
+					},
+					"tooltips": {
+						"mode": "index",
+						"intersect": "false",
+					},
+					"responsive": "true",
+				},
+			}
+			path = 'img/slpMintedVsBurned.png'
+			qc.to_file(path)
+		except ValueError as e:
+			return e
+		return path
+		"""
+		return
 
+	def get_breed_cost(self, nb=-1):
+		"""
+		Get the breeding cost
+		:param nb: breed lvl (0-6)
+		:return: dict with datas about the breeding costs
+		"""
+		breeds = {0: 150, 1: 300, 2: 450, 3: 750, 4: 1200, 5: 1950, 6: 3150}
+		axs = self.get_price('axs')
+		slp = self.get_price('slp')
+		total = 0
+		res = dict()
 
+		for i in range(0, 7):
+			breed_price = int((breeds[i] * slp) * 2 + (axs * 2))
+			total += breed_price
+			res[i] = {'price': breed_price, 'total_breed_price': total, 'average_price': int(total/(1+i))}
+
+		if nb <= -1:
+			return res
+		return {nb, res[nb]}
+
+	def get_prices_from_timestamp(self, timestamp):
+		"""
+		Get prices for AXS, SLP and ETH at given date
+		:param timestamp: date in unix timestamp format
+		:return: Dict with the prices of currencies at given date
+		"""
+		cg = CoinGeckoAPI()
+		dt = datetime.datetime.fromtimestamp(timestamp)
+
+		price_history = cg.get_coin_history_by_id(id='smooth-love-potion', date=dt.date().strftime('%d-%m-%Y'), vsCurrencies=['usd'])
+		slp_price = price_history['market_data']['current_price']['usd']
+
+		price_history = cg.get_coin_history_by_id(id='axie-infinity', date=dt.date().strftime('%d-%m-%Y'), vsCurrencies=['usd'])
+		axs_price = price_history['market_data']['current_price']['usd']
+
+		price_history = cg.get_coin_history_by_id(id='ethereum', date=dt.date().strftime('%d-%m-%Y'), vsCurrencies=['usd'])
+		eth_price = price_history['market_data']['current_price']['usd']
+
+		return {'slp': slp_price, 'axs': axs_price, 'eth': eth_price, 'date': timestamp}
+
+	def ronin_txs(self, ronin_address=''):
+		if ronin_address == '':
+			ronin_address = self.config['personal']['ronin_address']
+
+		url = "https://explorer.roninchain.com/api/txs/" + str(ronin_address) + "?size=10000"
+		h = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36'}
+		response = requests.get(url, headers=h)
+
+		try:
+			json_data = json.loads(response.text)
+		except ValueError as e:
+			return e
+		return json_data['results']
+
+	def get_axie_total_breed_cost(self, axie_id, txs={}):
+		"""
+		Get the price in $ you spent to breed an axie (based on prices history at time of breed)
+		:param axie_id: ID of the axie you want to evaluate
+		:param txs: Transactions datas if you already have it else leave it empty
+		:return:
+		"""
+		if not isinstance(axie_id, int):
+			return "Error in axie ID."
+		if txs == {}:
+			txs = self.ronin_txs()
+
+		children = self.get_axie_children(axie_id)
+		total = 0
+		l = list()
+		for i in txs:
+			if len(i['logs']) == 4 and len(i['logs'][3]['topics']) > 1 and int(i['logs'][3]['topics'][1], 16) in children:
+				prices = self.get_prices_from_timestamp(i['timestamp'])
+				slp_price = int(i['logs'][1]['data'], 16) * prices['slp']
+				axs_price = prices['axs'] * 2
+				l.append({'date': datetime.datetime.fromtimestamp(i['timestamp']).strftime('%d-%m-%Y'),
+							'axs_price': round(prices['axs'], 2), 'slp_price': round(prices['slp'], 2),
+							'breed_cost': round(slp_price + axs_price, 2), 'axs_cost': round(axs_price, 2),
+							'slp_cost': round(slp_price, 2), 'axie_id': int(i['logs'][3]['topics'][1], 16)})
+				total += slp_price + axs_price
+		res = dict()
+		res['total_breed_cost'] = round(total, 2)
+		res['average_breed_cost'] = round(total / len(children), 2)
+		res['details'] = l
+		return res
+
+	def get_account_balances(self, ronin_address=''):
+		"""
+		Get the different balances for a given account (AXS, SLP, WETH, AXIES)
+		:param ronin_address: ronin address of the account
+		:return: dict with currencies and amount
+		"""
+		if not ronin_address:
+			ronin_address = self.config['personal']['ronin_address']
+
+		url = "https://explorer.roninchain.com/api/tokenbalances/" + str(ronin_address).replace('ronin:', '0x')
+		headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36'}
+		response = requests.get(url, headers=headers)
+
+		try:
+			json_data = json.loads(response.text)
+		except ValueError as e:
+			return {'WETH': -1, 'AXS': -1, 'SLP': -1, 'axies': -1, 'eggs': -1, 'ronin_address': ronin_address}
+
+		res = {'WETH': 0, 'AXS': 0, 'SLP': 0, 'axies': 0, 'eggs': -1, 'ronin_address': ronin_address}
+		eggs = len(self.get_eggs(ronin_address))
+		for data in json_data['results']:
+			if data['token_symbol'] == 'WETH':
+				res['WETH'] = round(int(data['balance']) / math.pow(10, 18), 6)
+			elif data['token_symbol'] == 'AXS':
+				res['AXS'] = round(int(data['balance']) / math.pow(10, 18), 2)
+			elif data['token_symbol'] == 'SLP':
+				res['SLP'] = int(data['balance'])
+			elif data['token_symbol'] == 'AXIE':
+				res['axies'] = int(data['balance'] - eggs)
+		res['eggs'] = eggs
+		return res
+
+	def get_eggs(self, ronin_address=''):
+		"""
+		Get list of eggs from the account
+		:param ronin_address: Ronin address of the account
+		:return: List of eggs datas
+		"""
+		if not ronin_address:
+			ronin_address = self.config['personal']['ronin_address']
+		axies = self.get_axie_list(ronin_address.replace('ronin:', '0x'))
+		eggs = list()
+		for axie in axies:
+			if axie['stage'] == 1:
+				eggs.append(axie)
+		return eggs
+
+	def get_all_accounts_balances(self):
+		"""
+		Get balances for all accounts in the scholarship
+		:return: List of balances
+		"""
+		l = list()
+		l.append(self.config['personal']['ronin_address'])
+		for account in self.config['scholars']:
+			l.append(self.config['scholars'][account]['ronin_address'])
+
+		res = list()
+		for r in l:
+			res.append(self.get_account_balances(r))
+		return res
 
 
 

@@ -1,7 +1,7 @@
-eth_account==0.5.4
 web3==5.21.0
-qrcode==7.1
-discord.py==1.7.3
+pycoingecko==2.2.0
+eth_account==0.5.4
 requests==2.22.0
-discord==1.7.3
+qrcode==7.1
 PyYAML==5.4.1
+mnemonic==0.20
