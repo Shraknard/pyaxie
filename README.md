@@ -6,6 +6,9 @@ Python library to interact with Axie Infinity and Ronin.
 
 [You can find all the documentation here.](https://github.com/vmercadi/pyaxie/tree/main/documentation)  
 
+
+**If you encounter a problem or have a question, you can join the discord server : https://discord.gg/gqaSv2PZbF**  
+
 `datas` folder contains files for local storage.  
 `example` folder contains pre-made scripts that you can use for specifics tasks.  
 
