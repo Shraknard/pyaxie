@@ -1,5 +1,7 @@
 # pyaxie
 
+### /!\ I'M NOT WORKING ON THIS PROJECT ANYMORE, ITS NOT UP TO DATE AND SOME PARTS MAY NOT WORK.
+
 ## Description
 
 Python library to interact with Axie Infinity and Ronin.
