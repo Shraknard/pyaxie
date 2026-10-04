@@ -45,9 +45,9 @@ If you want to call pyaxie functions, you can do it the same way : `scholar.get_
 
 And that's it !  
 
-### [You can find the list of functions here.](https://github.com/vmercadi/pyaxie/documentation/functions.md)
+
 
 ## Tips 
-- You will find some pre-made scripts in [the examples folder](https://github.com/vmercadi/pyaxie/examples).
+- You will find some pre-made scripts in [the examples folder]
 - Don't be in a hurry, sometimes the requests can take some time. 
 - When you transfer SLP, make sure you filled correctly every fields and try with 1 SLP first to ensure it works well.
