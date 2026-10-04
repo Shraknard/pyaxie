@@ -2,7 +2,7 @@
 
 ## Install
 
-- Just download the .zip or use `git clone https://github.com/vmercadi/pyaxie.git`
+- Just download the .zip or use `git clone https://github.com/shraknard/pyaxie.git`
 - Next you have to install the requirements with `pip install -r requirements.txt`
 - Then, make sure that you have filled the `secret.yaml` file with your personnal and scholar informations.
 You can add as much scholars as you want by copy/past the `scholars1` part. Don't forget to change the name !
